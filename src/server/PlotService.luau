@@ -6,7 +6,13 @@ local GAP = 12
 local GRID_SIZE = 8
 local GRID_WIDTH = GRID_SIZE * PLOT_SIZE.X + (GRID_SIZE - 1) * GAP
 
-local PlotService = {}
+local plotAssigned = Instance.new("BindableEvent")
+local plotRemoving = Instance.new("BindableEvent")
+
+local PlotService = {
+	PlotAssigned = plotAssigned.Event,
+	PlotRemoving = plotRemoving.Event,
+}
 local plotsByUserId = {}
 local occupiedSlots = {}
 local characterConnections = {}
@@ -65,6 +71,7 @@ local function assignPlot(player)
 	plot.Parent = plotsFolder
 	plotsByUserId[player.UserId] = plot
 	occupiedSlots[slot] = true
+	plotAssigned:Fire(player, plot)
 
 	if player.Character then
 		task.spawn(placeCharacter, player, player.Character)
@@ -90,6 +97,7 @@ local function onPlayerRemoving(player)
 
 	local plot = plotsByUserId[player.UserId]
 	if plot then
+		plotRemoving:Fire(player, plot)
 		occupiedSlots[plot:GetAttribute("SlotIndex")] = nil
 		plotsByUserId[player.UserId] = nil
 		plot:Destroy()
@@ -100,6 +108,10 @@ local function onPlayerRemoving(player)
 			assignPlot(remainingPlayer)
 		end
 	end
+end
+
+function PlotService.getPlot(player)
+	return plotsByUserId[player.UserId]
 end
 
 function PlotService.start()
