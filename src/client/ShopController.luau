@@ -1,7 +1,7 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
-local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("config"):WaitForChild("TreasureConfig"))
+local MazeConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("config"):WaitForChild("MazeConfig"))
 local PlotConfig = require(ReplicatedStorage.Shared.config:WaitForChild("PlotConfig"))
 
 local ShopController = {}
@@ -12,7 +12,7 @@ function ShopController.start()
 	started = true
 	local player = Players.LocalPlayer
 	local playerGui = player:WaitForChild("PlayerGui")
-	local remote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("UpgradeTreasure")
+	local remote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("UpgradeExplorerLicense")
 	local plotRemote = ReplicatedStorage.Remotes:WaitForChild("UpgradePlot")
 	local plots = Workspace:WaitForChild("Plots")
 	local boards = {}
@@ -45,9 +45,9 @@ function ShopController.start()
 			return label
 		end
 		local isPlot = sign.Name == "PlotUpgradeSign"
-		text(8, 40, 28).Text = (isPlot and "Участок · " or "Клады · ") .. owner.Name
+		text(8, 40, 28).Text = (isPlot and "Участок · " or "Лицензия · ") .. owner.Name
 		local details = text(50, 140, 25)
-		text(192, 54, 20).Text = isPlot and "Применяется сразу\nНедоступно во время поиска" or "Для следующего клада\nДействует до выхода"
+		text(192, 54, 20).Text = isPlot and "Применяется сразу\nНедоступно во время поиска" or "Открывает более глубокие зоны\nДействует до выхода"
 		local button = Instance.new("TextButton")
 		button.Position = UDim2.fromOffset(24, 260)
 		button.Size = UDim2.new(1, -48, 0, 58)
@@ -75,17 +75,18 @@ function ShopController.start()
 				button.BackgroundColor3 = canBuy and Color3.fromRGB(90, 180, 110) or Color3.fromRGB(110, 110, 110)
 				return
 			end
-			local current = Config.types[owner:GetAttribute("TreasureUpgradeTypeId") or Config.defaultTypeId]
-			local nextType = current.nextTypeId and Config.types[current.nextTypeId]
+			local level = owner:GetAttribute("ExplorerLicenseLevel") or MazeConfig.defaultLicenseLevel
+			local current = MazeConfig.licenseLevels[level]
+			local nextLevel = MazeConfig.licenseLevels[level + 1]
 			local stats = owner:FindFirstChild("leaderstats")
 			local coins = stats and stats:FindFirstChild("Coins")
 			local balance = coins and coins.Value or 0
-			canBuy = owner == player and nextType ~= nil and balance >= current.upgradePrice and not board.pending
-			if nextType then
-				details.Text = string.format("Текущая: %s → Следующая: %s\nЦена: %d Coins · Баланс: %d\nНаграда искателю: %d · владельцу: %d", current.rarity, nextType.rarity, current.upgradePrice, balance, nextType.seekerReward, nextType.ownerReward)
+			canBuy = owner == player and nextLevel ~= nil and balance >= nextLevel.upgradePrice and not board.pending
+			if nextLevel then
+				details.Text = string.format("Уровень %d → %d\nОткроется: %s\nЦена: %d Coins · Баланс: %d", level, level + 1, nextLevel.displayName, nextLevel.upgradePrice, balance)
 				button.Text = owner ~= player and "Только для владельца" or (board.pending and "Покупка…" or (canBuy and "Купить улучшение" or "Недостаточно Coins"))
 			else
-				details.Text = string.format("Текущая: %s · Баланс: %d Coins\nНаграда искателю: %d · владельцу: %d", current.rarity, balance, current.seekerReward, current.ownerReward)
+				details.Text = string.format("Уровень %d · Все зоны открыты\n%s\nБаланс: %d Coins", level, current.displayName, balance)
 				button.Text = "Максимальный уровень"
 			end
 			button.Active = canBuy
@@ -108,7 +109,7 @@ function ShopController.start()
 			refresh()
 			if isPlot then plotRemote:FireServer(sign) else remote:FireServer(sign) end
 		end))
-		table.insert(board.connections, owner:GetAttributeChangedSignal("TreasureUpgradeTypeId"):Connect(refresh))
+		table.insert(board.connections, owner:GetAttributeChangedSignal("ExplorerLicenseLevel"):Connect(refresh))
 		table.insert(board.connections, owner:GetAttributeChangedSignal("PurchasedPlotLevel"):Connect(refresh))
 		if isPlot and sign.Parent then
 			table.insert(board.connections, sign.Parent:GetAttributeChangedSignal("SearchBusy"):Connect(refresh))

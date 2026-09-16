@@ -3,11 +3,6 @@ local Workspace = game:GetService("Workspace")
 
 local PlotConfig = require(game:GetService("ReplicatedStorage").Shared.config.PlotConfig)
 local PLOT_SIZE = Vector3.new(PlotConfig.levels[1].size, 1, PlotConfig.levels[1].size)
-local GRID_SIZE = PlotConfig.gridSize
-local SPACING = PlotConfig.spacing
-local CENTER_SLOT = math.ceil(GRID_SIZE * GRID_SIZE / 2)
--- Reserve space for the largest level, fence, and signs at the entrance.
-local GRID_WIDTH = (GRID_SIZE - 1) * SPACING + PlotConfig.levels[#PlotConfig.levels].size + 10
 
 local plotAssigned = Instance.new("BindableEvent")
 local plotRemoving = Instance.new("BindableEvent")
@@ -40,9 +35,8 @@ local function assignPlot(player)
 	end
 
 	local slot
-	for index = 1, GRID_SIZE * GRID_SIZE do
-		-- The middle of the map is reserved for the shared maze.
-		if index ~= CENTER_SLOT and not occupiedSlots[index] then
+	for index = 1, #PlotConfig.positions do
+		if not occupiedSlots[index] then
 			slot = index
 			break
 		end
@@ -52,9 +46,7 @@ local function assignPlot(player)
 		return
 	end
 
-	local column = (slot - 1) % GRID_SIZE
-	local row = math.floor((slot - 1) / GRID_SIZE)
-	local firstCenter = -(GRID_SIZE - 1) * SPACING / 2
+	local position = PlotConfig.positions[slot]
 	local plot = Instance.new("Model")
 	plot.Name = "Plot_" .. player.UserId
 	plot:SetAttribute("OwnerUserId", player.UserId)
@@ -67,10 +59,10 @@ local function assignPlot(player)
 	ground.Anchored = true
 	ground.Color = Color3.fromRGB(100, 160, 90)
 	ground.CFrame = baseplate.CFrame * CFrame.new(
-		firstCenter + column * SPACING,
+		position.X,
 		baseplate.Size.Y / 2 + PLOT_SIZE.Y / 2,
-		firstCenter + row * SPACING
-	)
+		position.Z
+	) * CFrame.Angles(0, math.pi / 2, 0)
 	ground.Parent = plot
 	plot.PrimaryPart = ground
 	plot.Parent = plotsFolder
@@ -125,8 +117,15 @@ function PlotService.start()
 	end
 	baseplate = Workspace:WaitForChild("Baseplate")
 	assert(baseplate:IsA("BasePart"), "Workspace.Baseplate must be a BasePart")
-	assert(baseplate.Size.X >= GRID_WIDTH and baseplate.Size.Z >= GRID_WIDTH,
-		"Baseplate is too small for the plot grid")
+	-- Studio can start a test before a changed project property finishes syncing.
+	-- Enforce the gameplay map size on the server before validating plot positions.
+	baseplate.Size = Vector3.new(PlotConfig.mapSize.X, baseplate.Size.Y, PlotConfig.mapSize.Y)
+	local requiredHalfSize = PlotConfig.levels[#PlotConfig.levels].size / 2 + 8
+	for _, position in PlotConfig.positions do
+		assert(math.abs(position.X) + requiredHalfSize <= baseplate.Size.X / 2
+			and math.abs(position.Z) + requiredHalfSize <= baseplate.Size.Z / 2,
+			"Baseplate is too small for the configured plot positions")
+	end
 	started = true
 
 	plotsFolder = Instance.new("Folder")

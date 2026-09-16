@@ -78,7 +78,7 @@ function CarryService.start(plotService, resolvedTreasureService, mazeService)
 		local root = character and character:FindFirstChild("HumanoidRootPart")
 		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 		if not root or not humanoid or humanoid.Health <= 0 or (root.Position - chest.Position).Magnitude > 12 then return end
-		local typeId = mazeService.claimLoot(chest)
+		local typeId = mazeService.claimLoot(player, chest)
 		if not typeId then return end
 		local payload = { kind = "maze", part = chest, typeId = typeId }
 		if not attach(player, payload) then

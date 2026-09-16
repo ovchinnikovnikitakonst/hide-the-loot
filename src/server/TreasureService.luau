@@ -102,7 +102,7 @@ function TreasureService.start(plotService, buryTreasure)
 		part.CanTouch = true
 		part.CanQuery = true
 		part.Massless = false
-		part.Color = Color3.fromRGB(255, 195, 45)
+		part.Color = TreasureConfig.types[record.typeId].color
 		part.Material = Enum.Material.Metal
 		part.CFrame = ground.CFrame * CFrame.new(0, ground.Size.Y / 2 + TREASURE_SIZE.Y / 2, 0)
 		part:SetAttribute("TreasureId", record.id)

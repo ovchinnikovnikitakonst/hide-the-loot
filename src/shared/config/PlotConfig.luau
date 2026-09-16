@@ -6,5 +6,17 @@ local levels = {
 	{ size = 80, treasureCapacity = 16, upgradePrice = 12000, description = "Фонтан, деревья, флаги" },
 	{ size = 88, treasureCapacity = 24, upgradePrice = 50000, description = "Ворота, статуи, композиция" },
 }
+local positions = {
+	Vector3.new(-450, 0, -230),
+	Vector3.new(-340, 0, -230),
+	Vector3.new(-450, 0, 0),
+	Vector3.new(-340, 0, 0),
+	Vector3.new(-450, 0, 230),
+	Vector3.new(-340, 0, 230),
+}
 for _, level in levels do table.freeze(level) end
-return table.freeze({ levels = table.freeze(levels), gridSize = 5, spacing = 100 })
+return table.freeze({
+	mapSize = Vector2.new(1024, 768),
+	levels = table.freeze(levels),
+	positions = table.freeze(positions),
+})

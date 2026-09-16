@@ -1,13 +1,13 @@
 local Players = game:GetService("Players")
-local Config = require(game:GetService("ReplicatedStorage").Shared.config.TreasureConfig)
+local Config = require(game:GetService("ReplicatedStorage").Shared.config.MazeConfig)
 
 local TreasureUpgradeService = {}
 local levels = {}
 local lastRequest = {}
 local started = false
 
-function TreasureUpgradeService.getTypeId(player)
-	return levels[player] or Config.defaultTypeId
+function TreasureUpgradeService.getLicenseLevel(player)
+	return levels[player] or Config.defaultLicenseLevel
 end
 
 function TreasureUpgradeService.start(economyService, remote, shopService)
@@ -15,8 +15,8 @@ function TreasureUpgradeService.start(economyService, remote, shopService)
 	started = true
 	local function addPlayer(player)
 		if player.Parent ~= Players or levels[player] then return end
-		levels[player] = Config.defaultTypeId
-		player:SetAttribute("TreasureUpgradeTypeId", levels[player])
+		levels[player] = Config.defaultLicenseLevel
+		player:SetAttribute("ExplorerLicenseLevel", levels[player])
 	end
 	Players.PlayerAdded:Connect(addPlayer)
 	Players.PlayerRemoving:Connect(function(player)
@@ -36,19 +36,18 @@ function TreasureUpgradeService.start(economyService, remote, shopService)
 			remote:FireClient(player, false, "Подойди к табличке на своём участке")
 			return
 		end
-		local current = Config.types[levels[player]]
-		if not current.nextTypeId then
-			remote:FireClient(player, false, "Достигнута максимальная редкость")
+		local nextLevel = Config.licenseLevels[levels[player] + 1]
+		if not nextLevel then
+			remote:FireClient(player, false, "Открыты все зоны лабиринта")
 			return
 		end
-		-- No yields between spending and granting the next level.
-		if not economyService.trySpendCoins(player, current.upgradePrice, "treasure_upgrade") then
+		if not economyService.trySpendCoins(player, nextLevel.upgradePrice, "explorer_license") then
 			remote:FireClient(player, false, "Недостаточно Coins")
 			return
 		end
-		levels[player] = current.nextTypeId
-		player:SetAttribute("TreasureUpgradeTypeId", levels[player])
-		remote:FireClient(player, true, "Куплено: " .. Config.types[levels[player]].rarity .. ". Применится к следующему кладу")
+		levels[player] = nextLevel.level
+		player:SetAttribute("ExplorerLicenseLevel", levels[player])
+		remote:FireClient(player, true, "Открыта зона: " .. nextLevel.displayName)
 	end)
 end
 
