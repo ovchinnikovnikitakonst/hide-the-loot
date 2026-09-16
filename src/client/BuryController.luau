@@ -40,7 +40,15 @@ function BuryController.start(onActivate)
 
 	local function getTreasure()
 		local plot = plots:FindFirstChild("Plot_" .. player.UserId)
-		return plot, plot and plot:FindFirstChild("Treasure")
+		if plot then
+			for _, child in plot:GetChildren() do
+				if child:IsA("BasePart") and child:GetAttribute("TreasureStatus") == "Unburied"
+					and child:GetAttribute("OwnerUserId") == player.UserId then
+					return plot, child
+				end
+			end
+		end
+		return plot, nil
 	end
 
 	RunService.RenderStepped:Connect(function()

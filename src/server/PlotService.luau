@@ -1,10 +1,13 @@
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 
-local PLOT_SIZE = Vector3.new(48, 1, 48)
-local GAP = 12
-local GRID_SIZE = 8
-local GRID_WIDTH = GRID_SIZE * PLOT_SIZE.X + (GRID_SIZE - 1) * GAP
+local PlotConfig = require(game:GetService("ReplicatedStorage").Shared.config.PlotConfig)
+local PLOT_SIZE = Vector3.new(PlotConfig.levels[1].size, 1, PlotConfig.levels[1].size)
+local GRID_SIZE = PlotConfig.gridSize
+local SPACING = PlotConfig.spacing
+local CENTER_SLOT = math.ceil(GRID_SIZE * GRID_SIZE / 2)
+-- Reserve space for the largest level, fence, and signs at the entrance.
+local GRID_WIDTH = (GRID_SIZE - 1) * SPACING + PlotConfig.levels[#PlotConfig.levels].size + 10
 
 local plotAssigned = Instance.new("BindableEvent")
 local plotRemoving = Instance.new("BindableEvent")
@@ -38,7 +41,8 @@ local function assignPlot(player)
 
 	local slot
 	for index = 1, GRID_SIZE * GRID_SIZE do
-		if not occupiedSlots[index] then
+		-- The middle of the map is reserved for the shared maze.
+		if index ~= CENTER_SLOT and not occupiedSlots[index] then
 			slot = index
 			break
 		end
@@ -50,11 +54,12 @@ local function assignPlot(player)
 
 	local column = (slot - 1) % GRID_SIZE
 	local row = math.floor((slot - 1) / GRID_SIZE)
-	local firstCenter = -GRID_WIDTH / 2 + PLOT_SIZE.X / 2
+	local firstCenter = -(GRID_SIZE - 1) * SPACING / 2
 	local plot = Instance.new("Model")
 	plot.Name = "Plot_" .. player.UserId
 	plot:SetAttribute("OwnerUserId", player.UserId)
 	plot:SetAttribute("SlotIndex", slot)
+	plot:SetAttribute("PlotLevel", 1)
 
 	local ground = Instance.new("Part")
 	ground.Name = "Ground"
@@ -62,9 +67,9 @@ local function assignPlot(player)
 	ground.Anchored = true
 	ground.Color = Color3.fromRGB(100, 160, 90)
 	ground.CFrame = baseplate.CFrame * CFrame.new(
-		firstCenter + column * (PLOT_SIZE.X + GAP),
+		firstCenter + column * SPACING,
 		baseplate.Size.Y / 2 + PLOT_SIZE.Y / 2,
-		firstCenter + row * (PLOT_SIZE.Z + GAP)
+		firstCenter + row * SPACING
 	)
 	ground.Parent = plot
 	plot.PrimaryPart = ground
