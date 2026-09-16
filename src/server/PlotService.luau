@@ -111,7 +111,7 @@ function PlotService.getPlot(player)
 	return plotsByUserId[player.UserId]
 end
 
-function PlotService.start()
+function PlotService.start(playerDataService)
 	if started then
 		return
 	end
@@ -120,6 +120,10 @@ function PlotService.start()
 	-- Studio can start a test before a changed project property finishes syncing.
 	-- Enforce the gameplay map size on the server before validating plot positions.
 	baseplate.Size = Vector3.new(PlotConfig.mapSize.X, baseplate.Size.Y, PlotConfig.mapSize.Y)
+	local spawnLocation = Workspace:FindFirstChildWhichIsA("SpawnLocation", true)
+	if spawnLocation then
+		spawnLocation.CFrame = baseplate.CFrame * CFrame.new(-270, baseplate.Size.Y / 2 + 3, 0)
+	end
 	local requiredHalfSize = PlotConfig.levels[#PlotConfig.levels].size / 2 + 8
 	for _, position in PlotConfig.positions do
 		assert(math.abs(position.X) + requiredHalfSize <= baseplate.Size.X / 2
@@ -132,10 +136,10 @@ function PlotService.start()
 	plotsFolder.Name = "Plots"
 	plotsFolder.Parent = Workspace
 
-	Players.PlayerAdded:Connect(onPlayerAdded)
+	playerDataService.DataLoaded:Connect(onPlayerAdded)
 	Players.PlayerRemoving:Connect(onPlayerRemoving)
 	for _, player in Players:GetPlayers() do
-		onPlayerAdded(player)
+		if playerDataService.isLoaded(player) then onPlayerAdded(player) end
 	end
 end
 

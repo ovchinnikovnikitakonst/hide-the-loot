@@ -70,6 +70,34 @@ function TreasureService.canSearch(plot)
 	return TreasureService.getRaidTypeId(plot) ~= nil
 end
 
+function TreasureService.getBuriedSummary(plot)
+	local summary = {
+		count = 0,
+		totalValue = 0,
+		incomePerMinute = 0,
+		highestRarity = nil,
+	}
+	local data = getDataForPlot(plot)
+	local highestValue = -1
+	if data then
+		for _, record in data.treasures do
+			if record.status == "buried" then
+				local definition = TreasureConfig.types[record.typeId]
+				if definition then
+					summary.count += 1
+					summary.totalValue += definition.seekerReward
+					summary.incomePerMinute += definition.incomePerMinute
+					if definition.seekerReward > highestValue then
+						highestValue = definition.seekerReward
+						summary.highestRarity = definition.rarity
+					end
+				end
+			end
+		end
+	end
+	return table.freeze(summary)
+end
+
 function TreasureService.start(plotService, buryTreasure)
 	if started then return end
 	started = true

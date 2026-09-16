@@ -1,6 +1,5 @@
 local Players = game:GetService("Players")
 
-local STARTING_COINS = 100000 -- Temporary test balance; no persistence yet.
 local MAX_SAFE_INTEGER = 9007199254740991
 local EconomyService = {}
 local accounts = {}
@@ -24,6 +23,7 @@ function EconomyService.addCoins(player, amount, reason)
 	account.balance += amount
 	account.display.Value = account.balance
 	account.lastReason = reason
+	account.playerDataService.setValue(player, "coins", account.balance)
 	return true
 end
 
@@ -37,28 +37,33 @@ function EconomyService.trySpendCoins(player, amount, reason)
 	account.balance -= amount
 	account.display.Value = account.balance
 	account.lastReason = reason
+	account.playerDataService.setValue(player, "coins", account.balance)
 	return true
 end
 
-function EconomyService.start()
+function EconomyService.start(playerDataService)
 	if started then return end
 	started = true
 	local function addPlayer(player)
 		if accounts[player] or player.Parent ~= Players then return end
+		local startingBalance = playerDataService.getValue(player, "coins")
+		if startingBalance == nil then return end
 		local stats = Instance.new("Folder")
 		stats.Name = "leaderstats"
 		local coins = Instance.new("IntValue")
 		coins.Name = "Coins"
-		coins.Value = STARTING_COINS
+		coins.Value = startingBalance
 		coins.Parent = stats
-		accounts[player] = { balance = STARTING_COINS, display = coins }
+		accounts[player] = { balance = startingBalance, display = coins, playerDataService = playerDataService }
 		stats.Parent = player
 	end
-	Players.PlayerAdded:Connect(addPlayer)
+	playerDataService.DataLoaded:Connect(addPlayer)
 	Players.PlayerRemoving:Connect(function(player)
 		accounts[player] = nil
 	end)
-	for _, player in Players:GetPlayers() do addPlayer(player) end
+	for _, player in Players:GetPlayers() do
+		if playerDataService.isLoaded(player) then addPlayer(player) end
+	end
 end
 
 return EconomyService

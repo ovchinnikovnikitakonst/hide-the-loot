@@ -124,7 +124,7 @@ local function buildDecorations(plot, ground, level)
 	decorations.Parent = plot
 end
 
-function PlotUpgradeService.start(plotService, economyService, remote)
+function PlotUpgradeService.start(plotService, economyService, remote, playerDataService)
 	if started then return end
 	started = true
 
@@ -160,15 +160,19 @@ function PlotUpgradeService.start(plotService, economyService, remote)
 
 	local function added(player)
 		if purchased[player] then return end
-		purchased[player] = 1
-		player:SetAttribute("PurchasedPlotLevel", 1)
+		local savedLevel = playerDataService.getValue(player, "plotLevel")
+		if savedLevel == nil then return end
+		purchased[player] = math.clamp(savedLevel, 1, #Config.levels)
+		player:SetAttribute("PurchasedPlotLevel", purchased[player])
 	end
-	Players.PlayerAdded:Connect(added)
+	playerDataService.DataLoaded:Connect(added)
 	Players.PlayerRemoving:Connect(function(player)
 		purchased[player] = nil
 		lastRequest[player] = nil
 	end)
-	for _, player in Players:GetPlayers() do added(player) end
+	for _, player in Players:GetPlayers() do
+		if playerDataService.isLoaded(player) then added(player) end
+	end
 
 	remote.OnServerEvent:Connect(function(player, sign)
 		local now = os.clock()
@@ -195,6 +199,7 @@ function PlotUpgradeService.start(plotService, economyService, remote)
 		end
 		purchased[player] = level + 1
 		player:SetAttribute("PurchasedPlotLevel", level + 1)
+		playerDataService.setValue(player, "plotLevel", level + 1)
 		if not applyLevel(player, plot, level + 1) then
 			warn("Purchased plot level could not be applied for " .. player.Name)
 		end

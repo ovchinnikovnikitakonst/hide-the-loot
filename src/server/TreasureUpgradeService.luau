@@ -10,20 +10,24 @@ function TreasureUpgradeService.getLicenseLevel(player)
 	return levels[player] or Config.defaultLicenseLevel
 end
 
-function TreasureUpgradeService.start(economyService, remote, shopService)
+function TreasureUpgradeService.start(economyService, remote, shopService, playerDataService)
 	if started then return end
 	started = true
 	local function addPlayer(player)
 		if player.Parent ~= Players or levels[player] then return end
-		levels[player] = Config.defaultLicenseLevel
+		local savedLevel = playerDataService.getValue(player, "explorerLicenseLevel")
+		if savedLevel == nil then return end
+		levels[player] = math.clamp(savedLevel, 1, #Config.licenseLevels)
 		player:SetAttribute("ExplorerLicenseLevel", levels[player])
 	end
-	Players.PlayerAdded:Connect(addPlayer)
+	playerDataService.DataLoaded:Connect(addPlayer)
 	Players.PlayerRemoving:Connect(function(player)
 		levels[player] = nil
 		lastRequest[player] = nil
 	end)
-	for _, player in Players:GetPlayers() do addPlayer(player) end
+	for _, player in Players:GetPlayers() do
+		if playerDataService.isLoaded(player) then addPlayer(player) end
+	end
 	remote.OnServerEvent:Connect(function(player, sign)
 		if not levels[player] then return end
 		local now = os.clock()
@@ -47,6 +51,7 @@ function TreasureUpgradeService.start(economyService, remote, shopService)
 		end
 		levels[player] = nextLevel.level
 		player:SetAttribute("ExplorerLicenseLevel", levels[player])
+		playerDataService.setValue(player, "explorerLicenseLevel", levels[player])
 		remote:FireClient(player, true, "Открыта зона: " .. nextLevel.displayName)
 	end)
 end
