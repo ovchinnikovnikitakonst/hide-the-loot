@@ -8,9 +8,11 @@ local TREASURE_SIZE = Vector3.new(3, 2, 3)
 local MIN_BURY_DISTANCE = 4
 local treasureBuried = Instance.new("BindableEvent")
 local treasureInactive = Instance.new("BindableEvent")
+local storageChanged = Instance.new("BindableEvent")
 local TreasureService = {
 	TreasureBuried = treasureBuried.Event,
 	TreasureInactive = treasureInactive.Event,
+	StorageChanged = storageChanged.Event,
 }
 local dataByUserId = {}
 local nextTreasureId = 0
@@ -31,17 +33,21 @@ end
 local function updateBuriedAttribute(data)
 	local hasBuried = false
 	local buriedCount = 0
+	local storedCount = 0
 	local totalCount = 0
 	for _, record in data.treasures do
 		totalCount += 1
 		if record.status == "buried" then
 			hasBuried = true
 			buriedCount += 1
+		elseif record.status == "stored" or record.status == "selected" then
+			storedCount += 1
 		end
 	end
 	data.plot:SetAttribute("HasBuriedTreasure", hasBuried)
 	data.plot:SetAttribute("TreasureCount", totalCount)
 	data.plot:SetAttribute("BuriedTreasureCount", buriedCount)
+	data.plot:SetAttribute("StoredTreasureCount", storedCount)
 end
 
 function TreasureService.getRaidTypeId(plot)
@@ -98,6 +104,27 @@ function TreasureService.getBuriedSummary(plot)
 	return table.freeze(summary)
 end
 
+function TreasureService.getStoredTreasures(plot)
+	local result = {}
+	local data = getDataForPlot(plot)
+	if data then
+		for _, record in data.treasures do
+			if record.status == "stored" or record.status == "selected" then
+				table.insert(result, table.freeze({
+					id = record.id,
+					typeId = record.typeId,
+					part = record.part,
+					selected = record.status == "selected",
+				}))
+			end
+		end
+	end
+	table.sort(result, function(a, b)
+		return (tonumber(a.id) or 0) < (tonumber(b.id) or 0)
+	end)
+	return table.freeze(result)
+end
+
 function TreasureService.start(plotService, buryTreasure)
 	if started then return end
 	started = true
@@ -118,7 +145,7 @@ function TreasureService.start(plotService, buryTreasure)
 		return PlotConfig.levels[level].treasureCapacity
 	end
 
-	local function preparePart(part, player, record, plot)
+	local function prepareStoredPart(part, player, record, plot)
 		for _, child in part:GetChildren() do
 			if child:IsA("WeldConstraint") or child:IsA("ProximityPrompt") then child:Destroy() end
 		end
@@ -138,7 +165,7 @@ function TreasureService.start(plotService, buryTreasure)
 		part:SetAttribute("TreasureTypeId", record.typeId)
 		part:SetAttribute("Rarity", TreasureConfig.types[record.typeId].rarity)
 		part:SetAttribute("AcquisitionSource", record.source)
-		part:SetAttribute("TreasureStatus", "Unburied")
+		part:SetAttribute("TreasureStatus", "Stored")
 		part:SetAttribute("IsBuried", false)
 		part:SetAttribute("IsFound", false)
 		part.Parent = plot
@@ -149,7 +176,7 @@ function TreasureService.start(plotService, buryTreasure)
 		if not plot or not plot.Parent or plot:GetAttribute("SearchBusy") then return false end
 		local data = dataByUserId[player.UserId]
 		if data and data.plot ~= plot then return false end
-		return (not data or (not data.pendingId and countTreasures(data) < capacityFor(plot)))
+		return not data or countTreasures(data) < capacityFor(plot)
 	end
 
 	function TreasureService.acceptCarriedTreasure(player, payload)
@@ -160,13 +187,38 @@ function TreasureService.start(plotService, buryTreasure)
 		local plot = plotService.getPlot(player)
 		local data = getOrCreateData(player, plot)
 		nextTreasureId += 1
-		local treasureId = payload.treasureId or tostring(nextTreasureId)
-		local record = { id = treasureId, typeId = payload.typeId, part = payload.part, status = "unburied", source = payload.kind }
+		local treasureId = tostring(nextTreasureId)
+		local record = { id = treasureId, typeId = payload.typeId, part = payload.part, status = "stored", source = payload.kind }
 		data.treasures[treasureId] = record
-		data.pendingId = treasureId
 		payload.resolved = true
-		preparePart(payload.part, player, record, plot)
+		prepareStoredPart(payload.part, player, record, plot)
 		updateBuriedAttribute(data)
+		storageChanged:Fire(player, plot)
+		return true
+	end
+
+	function TreasureService.toggleStoredTreasure(player, plot, treasureId)
+		local data = dataByUserId[player.UserId]
+		if not data or data.plot ~= plot or plotService.getPlot(player) ~= plot
+			or not plot.Parent or plot:GetAttribute("SearchBusy") then return false end
+		local record = data.treasures[treasureId]
+		if not record or (record.status ~= "stored" and record.status ~= "selected") then return false end
+		if data.pendingId == treasureId then
+			record.status = "stored"
+			record.part:SetAttribute("TreasureStatus", "Stored")
+			data.pendingId = nil
+		else
+			local previous = data.pendingId and data.treasures[data.pendingId]
+			if previous and previous.status == "selected" then
+				previous.status = "stored"
+				previous.part:SetAttribute("TreasureStatus", "Stored")
+			end
+			record.status = "selected"
+			record.part:SetAttribute("TreasureStatus", "Unburied")
+			data.pendingId = treasureId
+		end
+		updateBuriedAttribute(data)
+		storageChanged:Fire(player, plot)
 		return true
 	end
 
@@ -260,7 +312,7 @@ function TreasureService.start(plotService, buryTreasure)
 	buryTreasure.OnServerEvent:Connect(function(player, position)
 		local data = dataByUserId[player.UserId]
 		local record = data and data.pendingId and data.treasures[data.pendingId]
-		if not data or not record then buryTreasure:FireClient(player, false) return end
+		if not data or not record or record.status ~= "selected" then buryTreasure:FireClient(player, false) return end
 		local now = os.clock()
 		if record.lastRequest and now - record.lastRequest < 0.25 then return end
 		record.lastRequest = now
@@ -297,7 +349,11 @@ function TreasureService.start(plotService, buryTreasure)
 		record.part.CFrame = ground.CFrame * CFrame.new(target.X, half.Y - TREASURE_SIZE.Y / 2 - 0.5, target.Z)
 		record.part:SetAttribute("TreasureStatus", "Buried")
 		record.part:SetAttribute("IsBuried", true)
+		for _, child in record.part:GetChildren() do
+			if child:IsA("ProximityPrompt") then child:Destroy() end
+		end
 		updateBuriedAttribute(data)
+		storageChanged:Fire(player, plot)
 		treasureBuried:Fire(player, plot, record.id, record.typeId)
 		buryTreasure:FireClient(player, true)
 	end)
