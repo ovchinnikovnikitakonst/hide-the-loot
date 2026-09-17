@@ -57,7 +57,10 @@ local function assignPlot(player)
 	ground.Name = "Ground"
 	ground.Size = PLOT_SIZE
 	ground.Anchored = true
-	ground.Color = Color3.fromRGB(100, 160, 90)
+	ground.Color = Color3.fromRGB(92, 157, 82)
+	ground.Material = Enum.Material.Grass
+	ground.TopSurface = Enum.SurfaceType.Smooth
+	ground.BottomSurface = Enum.SurfaceType.Smooth
 	ground.CFrame = baseplate.CFrame * CFrame.new(
 		position.X,
 		baseplate.Size.Y / 2 + PLOT_SIZE.Y / 2,

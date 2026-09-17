@@ -17,7 +17,7 @@ function PlotValueService.start(plotService, treasureService)
 		if not ground then return end
 		local board = Instance.new("Part")
 		board.Name = "PlotValueSign"
-		board.Size = Vector3.new(18, 6, 1)
+		board.Size = Vector3.new(12, 4.2, 0.7)
 		board.Anchored = true
 		board.CanCollide = false
 		board.Color = Color3.fromRGB(24, 28, 34)
@@ -28,13 +28,13 @@ function PlotValueService.start(plotService, treasureService)
 		local gui = Instance.new("SurfaceGui")
 		gui.Name = "PublicValue"
 		gui.Face = Enum.NormalId.Front
-		gui.CanvasSize = Vector2.new(720, 280)
+		gui.CanvasSize = Vector2.new(600, 210)
 		gui.Parent = board
 		local label = Instance.new("TextLabel")
 		label.Size = UDim2.fromScale(1, 1)
 		label.BackgroundTransparency = 1
 		label.TextColor3 = Color3.fromRGB(245, 245, 245)
-		label.TextSize = 30
+		label.TextSize = 27
 		label.TextWrapped = true
 		label.Font = Enum.Font.GothamBold
 		label.Parent = gui
@@ -43,7 +43,7 @@ function PlotValueService.start(plotService, treasureService)
 		records[plot] = record
 		local function reposition()
 			if not plot.Parent or not ground.Parent then return end
-			board.CFrame = ground.CFrame * CFrame.new(0, 9.5, ground.Size.Z / 2 + 4)
+			board.CFrame = ground.CFrame * CFrame.new(0, 7.2, ground.Size.Z / 2 + 2.5)
 				* CFrame.Angles(0, math.pi, 0)
 		end
 		local function refresh()
@@ -53,20 +53,20 @@ function PlotValueService.start(plotService, treasureService)
 			if plot:GetAttribute("SearchBusy") then
 				status = "ИДЁТ ПОИСК"
 			elseif plot:GetAttribute("SearchFinished") then
-				status = "ПЕРЕРЫВ ПОСЛЕ ПОИСКА"
+				status = "ПЕРЕРЫВ"
 			elseif summary.count == 0 then
-				status = "НЕТ ЗАКОПАННЫХ КЛАДОВ"
+				status = "НЕТ КЛАДОВ"
 			else
 				status = "МОЖНО АТАКОВАТЬ"
 			end
 			label.Text = string.format(
-				"Хранилище · %s\nСундуков: %d  ·  Лучшая редкость: %s\nЦенность рейда: %d Coins  ·  Доход: %d Coins/min\n%s",
+				"%s · %s\nКлады: %d · %s\nЦенность: %d · +%d Coins/min",
 				player.Name,
+				status,
 				summary.count,
 				summary.highestRarity or "—",
 				summary.totalValue,
-				summary.incomePerMinute,
-				status
+				summary.incomePerMinute
 			)
 		end
 		table.insert(record.connections, plot:GetAttributeChangedSignal("PlotLevel"):Connect(reposition))

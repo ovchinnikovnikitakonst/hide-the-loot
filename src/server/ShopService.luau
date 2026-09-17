@@ -21,17 +21,17 @@ function ShopService.start(plotService)
 		if not ground then return end
 		local sign = Instance.new("Part")
 		sign.Name = "ShopSign"
-		sign.Size = Vector3.new(8, 5, 1)
+		sign.Size = Vector3.new(6.5, 4, 0.7)
 		sign.Anchored = true
 		sign.Color = Color3.fromRGB(30, 30, 35)
 		-- Front face points outward toward approaching visitors.
-		sign.CFrame = ground.CFrame * CFrame.new(-9, 3.5, ground.Size.Z / 2 + 4) * CFrame.Angles(0, math.pi, 0)
+		sign.CFrame = ground.CFrame * CFrame.new(-8, 2.75, ground.Size.Z / 2 + 2.3) * CFrame.Angles(0, math.pi, 0)
 		sign:SetAttribute("OwnerUserId", player.UserId)
 		signs[player] = sign
 		sign.Parent = plot
 		local plotSign = sign:Clone()
 		plotSign.Name = "PlotUpgradeSign"
-		plotSign.CFrame = ground.CFrame * CFrame.new(9, 3.5, ground.Size.Z / 2 + 4) * CFrame.Angles(0, math.pi, 0)
+		plotSign.CFrame = ground.CFrame * CFrame.new(8, 2.75, ground.Size.Z / 2 + 2.3) * CFrame.Angles(0, math.pi, 0)
 		plotSign.Parent = plot
 	end
 	plotService.PlotAssigned:Connect(create)

@@ -3,17 +3,19 @@ local Workspace = game:GetService("Workspace")
 
 local DURATION = 30
 local ATTEMPTS = 3
-local COOLDOWN = 5
+local ROUND_RESET_DELAY = 5
+local FAILED_RETRY_COOLDOWN = 5 * 60
 local roundFinished = Instance.new("BindableEvent")
 local SearchService = { RoundFinished = roundFinished.Event }
 local started = false
 
-function SearchService.start(plotService, treasureService, carryService, digRemote, roundRemote)
+function SearchService.start(plotService, treasureService, carryService, digRemote, roundRemote, playerDataService)
 	if started then return end
 	started = true
 	local rounds = {}
 	local busy = {}
 	local completed = {}
+	local failedRetryAt = {}
 	local lastStart = {}
 	local nextRoundId = 0
 
@@ -22,6 +24,26 @@ function SearchService.start(plotService, treasureService, carryService, digRemo
 	end
 	local function update(round)
 		send(round.seeker, "active", round.plot, round.deadline, round.attempts, ATTEMPTS)
+	end
+	local function setPersistentRetry(player, ownerUserId, retryAt)
+		local current = playerDataService.getValue(player, "searchCooldowns") or {}
+		local updated = {}
+		local now = os.time()
+		for key, value in current do
+			if value > now and key ~= tostring(ownerUserId) then updated[key] = value end
+		end
+		if retryAt then updated[tostring(ownerUserId)] = retryAt end
+		playerDataService.setValue(player, "searchCooldowns", updated)
+	end
+	local function setRetry(player, ownerUserId, retryAt)
+		local seekerCooldowns = failedRetryAt[player.UserId]
+		if not seekerCooldowns then
+			seekerCooldowns = {}
+			failedRetryAt[player.UserId] = seekerCooldowns
+		end
+		seekerCooldowns[ownerUserId] = retryAt
+		if not retryAt and next(seekerCooldowns) == nil then failedRetryAt[player.UserId] = nil end
+		setPersistentRetry(player, ownerUserId, retryAt)
 	end
 	local function finish(round, outcome, reason)
 		if rounds[round.seeker] ~= round then return end
@@ -45,10 +67,23 @@ function SearchService.start(plotService, treasureService, carryService, digRemo
 		end
 		local winner = outcome == "seeker" and round.seeker or round.owner
 		local message = outcome == "cancelled" and reason or ("Победил " .. winner.Name .. ": " .. reason)
+		if outcome == "owner" then
+			local retryAt = os.time() + FAILED_RETRY_COOLDOWN
+			setRetry(round.seeker, round.owner.UserId, retryAt)
+			task.delay(FAILED_RETRY_COOLDOWN, function()
+				local seekerCooldowns = failedRetryAt[round.seeker.UserId]
+				if seekerCooldowns and seekerCooldowns[round.owner.UserId] == retryAt then
+					seekerCooldowns[round.owner.UserId] = nil
+					if next(seekerCooldowns) == nil then failedRetryAt[round.seeker.UserId] = nil end
+				end
+			end)
+		else
+			setRetry(round.seeker, round.owner.UserId, nil)
+		end
 		send(round.seeker, "finished", message)
 		send(round.owner, "result", message)
 		if outcome ~= "cancelled" then
-			task.delay(COOLDOWN, function()
+			task.delay(ROUND_RESET_DELAY, function()
 				if completed[round.plot] ~= round or round.owner.Parent ~= Players
 					or not round.plot.Parent or plotService.getPlot(round.owner) ~= round.plot then return end
 				completed[round.plot] = nil
@@ -89,9 +124,22 @@ function SearchService.start(plotService, treasureService, carryService, digRemo
 		if not owner or owner == player or plotService.getPlot(owner) ~= plot or not onPlot then
 			send(player, "error", "Встань на чужой участок с закопанным кладом") return
 		end
+		local seekerCooldowns = failedRetryAt[player.UserId]
+		local savedCooldowns = playerDataService.getValue(player, "searchCooldowns")
+		local retryAt = math.max(seekerCooldowns and seekerCooldowns[owner.UserId] or 0,
+			savedCooldowns and savedCooldowns[tostring(owner.UserId)] or 0)
+		local unixNow = os.time()
+		if retryAt > unixNow then
+			local remaining = retryAt - unixNow
+			send(player, "error", string.format("Повторный поиск у этого игрока через %d:%02d", math.floor(remaining / 60), remaining % 60))
+			return
+		elseif retryAt > 0 then
+			setRetry(player, owner.UserId, nil)
+		end
 		if completed[plot] or busy[plot] then send(player, "error", "Поиск уже завершён или участок занят") return end
 		local typeId = treasureService.getRaidTypeId(plot)
 		if not typeId then return end
+		setRetry(player, owner.UserId, os.time() + FAILED_RETRY_COOLDOWN)
 		nextRoundId += 1
 		local round = { id = nextRoundId, treasureTypeId = typeId,
 			seeker = player, owner = owner, plot = plot, attempts = ATTEMPTS,

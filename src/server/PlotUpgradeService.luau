@@ -1,10 +1,19 @@
 local Players = game:GetService("Players")
+local InsertService = game:GetService("InsertService")
+local ServerStorage = game:GetService("ServerStorage")
 local Config = require(game:GetService("ReplicatedStorage").Shared.config.PlotConfig)
 
 local PlotUpgradeService = {}
 local started = false
 local purchased = {}
 local lastRequest = {}
+local assetTemplates = {}
+local failedAssets = {}
+
+local TARGET_FENCE_HEIGHT = 3.8
+local TARGET_LAMP_HEIGHT = 6
+local TARGET_GATE_HEIGHT = 7.5
+local GATE_HALF_WIDTH = 5
 
 local function createPart(parent, ground, name, size, offset, color, material)
 	local object = Instance.new("Part")
@@ -18,29 +27,153 @@ local function createPart(parent, ground, name, size, offset, color, material)
 	return object
 end
 
-local function buildFence(plot, ground)
+local function loadAssetTemplate(assetId, targetHeight)
+	if assetTemplates[assetId] then return assetTemplates[assetId] end
+	if failedAssets[assetId] then return nil end
+
+	local success, asset = pcall(function()
+		return InsertService:LoadAsset(assetId)
+	end)
+	if not success or not asset then
+		failedAssets[assetId] = true
+		warn(string.format("Plot asset %d could not be loaded: %s", assetId, tostring(asset)))
+		return nil
+	end
+
+	for _, descendant in asset:GetDescendants() do
+		if descendant:IsA("LuaSourceContainer")
+			or descendant:IsA("ClickDetector")
+			or descendant:IsA("ProximityPrompt") then
+			descendant:Destroy()
+		elseif descendant:IsA("BasePart") then
+			descendant.Anchored = true
+			descendant.CanCollide = true
+			descendant.CanTouch = false
+		end
+	end
+
+	if not asset:FindFirstChildWhichIsA("BasePart", true) then
+		failedAssets[assetId] = true
+		asset:Destroy()
+		warn(string.format("Plot asset %d contains no geometry", assetId))
+		return nil
+	end
+
+	asset.Name = "PlotAsset_" .. assetId
+	local initialSize = asset:GetExtentsSize()
+	if initialSize.Y <= 0 then
+		failedAssets[assetId] = true
+		asset:Destroy()
+		return nil
+	end
+	asset:ScaleTo(asset:GetScale() * math.clamp(targetHeight / initialSize.Y, 0.02, 20))
+	asset:PivotTo(CFrame.identity)
+	asset.Parent = ServerStorage
+	assetTemplates[assetId] = asset
+	return asset
+end
+
+local function buildSimpleFence(fence, ground)
+	local half = ground.Size.X / 2 + 0.5
+	local wood = Color3.fromRGB(126, 89, 59)
+	local function fencePart(name, size, x, y, z)
+		return createPart(fence, ground, name, size, Vector3.new(x, y, z), wood, Enum.Material.Wood)
+	end
+	local function post(x, z, name)
+		fencePart(name or "Post", Vector3.new(0.8, 3.4, 0.8), x, 1.7, z)
+		local cap = fencePart("PostCap", Vector3.new(1.05, 1.05, 1.05), x, 3.55, z)
+		cap.Shape = Enum.PartType.Ball
+	end
+	for x = -half, half, 8 do post(x, -half) end
+	post(half, -half)
+	for _, x in { -half, half } do
+		for z = -half + 8, half, 8 do post(x, math.min(z, half)) end
+	end
+	for x = -half, -GATE_HALF_WIDTH - 2, 8 do post(x, half) end
+	for x = GATE_HALF_WIDTH + 2, half, 8 do post(x, half) end
+	post(-GATE_HALF_WIDTH, half, "GatePost")
+	post(GATE_HALF_WIDTH, half, "GatePost")
+	post(-half, half)
+	post(half, half)
+	for _, y in { 1.15, 2.55 } do
+		fencePart("BackRail", Vector3.new(half * 2, 0.4, 0.4), 0, y, -half)
+		for _, x in { -half, half } do fencePart("SideRail", Vector3.new(0.4, 0.4, half * 2), x, y, 0) end
+		local length = half - GATE_HALF_WIDTH
+		for _, direction in { -1, 1 } do
+			fencePart("FrontRail", Vector3.new(length, 0.4, 0.4), direction * (half + GATE_HALF_WIDTH) / 2, y, half)
+		end
+	end
+end
+
+local function buildAssetFence(fence, ground, assetId)
+	local template = loadAssetTemplate(assetId, TARGET_FENCE_HEIGHT)
+	if not template then return false end
+
+	local relativeBounds, boundsSize = template:GetBoundingBox()
+	local segmentLength = math.max(boundsSize.X, boundsSize.Z)
+	if segmentLength <= 0 then return false end
+	local baseRotation = boundsSize.Z > boundsSize.X and math.pi / 2 or 0
+	local half = ground.Size.X / 2 + 0.5
+	local height = ground.Size.Y / 2 + boundsSize.Y / 2
+
+	local function placeSpan(x1, z1, x2, z2)
+		local dx = x2 - x1
+		local dz = z2 - z1
+		local length = math.sqrt(dx * dx + dz * dz)
+		local count = math.max(1, math.ceil(length / (segmentLength * 0.94)))
+		local angle = math.atan2(dz, dx) + baseRotation
+		for index = 1, count do
+			local alpha = (index - 0.5) / count
+			local x = x1 + dx * alpha
+			local z = z1 + dz * alpha
+			local desiredBounds = ground.CFrame
+				* CFrame.new(x, height, z)
+				* CFrame.Angles(0, angle, 0)
+			local segment = template:Clone()
+			segment.Name = "FenceSegment"
+			segment:PivotTo(desiredBounds * relativeBounds:Inverse())
+			segment.Parent = fence
+		end
+	end
+
+	placeSpan(-half, -half, half, -half)
+	placeSpan(-half, -half, -half, half)
+	placeSpan(half, -half, half, half)
+	placeSpan(-half, half, -GATE_HALF_WIDTH, half)
+	placeSpan(GATE_HALF_WIDTH, half, half, half)
+	fence:SetAttribute("AssetId", assetId)
+	return true
+end
+
+local function buildFence(plot, ground, level)
 	local oldFence = plot:FindFirstChild("Fence")
 	if oldFence then oldFence:Destroy() end
 	local fence = Instance.new("Model")
 	fence.Name = "Fence"
-	local half = ground.Size.X / 2 + 0.5
-	local wood = Color3.fromRGB(126, 89, 59)
-	local function fencePart(name, size, x, y, z)
-		createPart(fence, ground, name, size, Vector3.new(x, y, z), wood, Enum.Material.Wood)
-	end
-	for _, x in { -half, half } do
-		for _, z in { -half, half } do fencePart("Post", Vector3.new(1, 4, 1), x, 2, z) end
-	end
-	for _, x in { -4.5, 4.5 } do fencePart("GatePost", Vector3.new(1, 4, 1), x, 2, half) end
-	for _, y in { 1.3, 3 } do
-		fencePart("BackRail", Vector3.new(half * 2, 0.6, 0.6), 0, y, -half)
-		for _, x in { -half, half } do fencePart("SideRail", Vector3.new(0.6, 0.6, half * 2), x, y, 0) end
-		local length = half - 4.5
-		for _, direction in { -1, 1 } do
-			fencePart("FrontRail", Vector3.new(length, 0.6, 0.6), direction * (half + 4.5) / 2, y, half)
-		end
+	local assetId = Config.levels[level].fenceAssetId
+	if not assetId or not buildAssetFence(fence, ground, assetId) then
+		buildSimpleFence(fence, ground)
 	end
 	fence.Parent = plot
+end
+
+local function placeAsset(parent, ground, assetId, name, x, z, targetHeight, alignLongestWithX)
+	local template = loadAssetTemplate(assetId, targetHeight)
+	if not template then return nil end
+
+	local relativeBounds, boundsSize = template:GetBoundingBox()
+	local rotation = 0
+	if alignLongestWithX and boundsSize.Z > boundsSize.X then
+		rotation = math.pi / 2
+	end
+	local desiredBounds = ground.CFrame
+		* CFrame.new(x, ground.Size.Y / 2 + boundsSize.Y / 2, z)
+		* CFrame.Angles(0, rotation, 0)
+	local instance = template:Clone()
+	instance.Name = name
+	instance:PivotTo(desiredBounds * relativeBounds:Inverse())
+	instance.Parent = parent
+	return instance
 end
 
 local function buildDecorations(plot, ground, level)
@@ -50,76 +183,32 @@ local function buildDecorations(plot, ground, level)
 	decorations.Name = "Decorations"
 	decorations:SetAttribute("BuiltForLevel", level)
 	local edge = ground.Size.X / 2 - 3
-	local wood = Color3.fromRGB(126, 89, 59)
-	local stone = Color3.fromRGB(125, 130, 135)
-
-	if level >= 2 then
-		for _, x in { -7, 7 } do
-			createPart(decorations, ground, "LampPost", Vector3.new(0.7, 5, 0.7), Vector3.new(x, 2.5, edge), wood, Enum.Material.Wood)
-			local lamp = createPart(decorations, ground, "Lamp", Vector3.new(1.5, 1.5, 1.5), Vector3.new(x, 5.3, edge), Color3.fromRGB(255, 210, 90), Enum.Material.Neon)
-			local light = Instance.new("PointLight")
-			light.Range = 14
-			light.Brightness = 1.5
-			light.Parent = lamp
-		end
-		createPart(decorations, ground, "Crate", Vector3.new(3, 3, 3), Vector3.new(-edge, 1.5, -edge + 2), wood, Enum.Material.WoodPlanks)
-		local barrel = createPart(decorations, ground, "Barrel", Vector3.new(3, 3, 3), Vector3.new(edge, 1.5, -edge + 2), Color3.fromRGB(105, 72, 48), Enum.Material.Wood)
-		barrel.Shape = Enum.PartType.Cylinder
-		barrel.CFrame *= CFrame.Angles(0, 0, math.pi / 2)
-	end
 
 	if level >= 3 then
-		for z = 4, math.max(4, edge - 5), 5 do
-			createPart(decorations, ground, "PathStone", Vector3.new(4, 0.2, 3), Vector3.new(0, 0.6, z), stone, Enum.Material.Slate)
-		end
-		createPart(decorations, ground, "BenchSeat", Vector3.new(7, 0.6, 2), Vector3.new(-edge + 3, 2, 0), wood, Enum.Material.WoodPlanks)
-		createPart(decorations, ground, "BenchBack", Vector3.new(7, 3, 0.5), Vector3.new(-edge + 3, 3.2, -1), wood, Enum.Material.WoodPlanks)
-		for _, z in { -8, 8 } do
-			local bush = createPart(decorations, ground, "Bush", Vector3.new(3.5, 3.5, 3.5), Vector3.new(edge - 1, 1.8, z), Color3.fromRGB(65, 135, 65), Enum.Material.Grass)
-			bush.Shape = Enum.PartType.Ball
-		end
-	end
-
-	if level >= 4 then
-		local x = -edge + 5
-		local z = -edge + 5
-		for _, dx in { -4, 4 } do
-			for _, dz in { -3, 3 } do
-				createPart(decorations, ground, "CanopyPost", Vector3.new(0.6, 6, 0.6), Vector3.new(x + dx, 3, z + dz), wood, Enum.Material.Wood)
+		for _, x in { -edge + 2.5, edge - 2.5 } do
+			for _, offset in { Vector3.new(-0.8, 0, 0), Vector3.new(0.8, 0, 0), Vector3.new(0, 0.7, 0.4) } do
+				local bush = createPart(decorations, ground, "Bush", Vector3.new(2.2, 2.2, 2.2), Vector3.new(x, 1.1, -edge + 2) + offset, Color3.fromRGB(65, 135, 65), Enum.Material.Grass)
+				bush.Shape = Enum.PartType.Ball
 			end
 		end
-		createPart(decorations, ground, "CanopyRoof", Vector3.new(10, 0.7, 8), Vector3.new(x, 6.3, z), Color3.fromRGB(175, 70, 55), Enum.Material.Fabric)
-		createPart(decorations, ground, "WorkTable", Vector3.new(6, 2.5, 3), Vector3.new(x, 1.3, z), wood, Enum.Material.WoodPlanks)
-		createPart(decorations, ground, "ToolRack", Vector3.new(1, 5, 7), Vector3.new(edge - 1, 2.5, -8), Color3.fromRGB(80, 82, 86), Enum.Material.Metal)
 	end
 
 	if level >= 5 then
-		createPart(decorations, ground, "FountainBase", Vector3.new(9, 1, 9), Vector3.new(0, 0.8, -edge + 6), stone, Enum.Material.Marble)
-		local water = createPart(decorations, ground, "FountainWater", Vector3.new(6, 0.4, 6), Vector3.new(0, 1.5, -edge + 6), Color3.fromRGB(70, 170, 235), Enum.Material.Glass)
-		water.Transparency = 0.25
-		for _, x in { -edge + 4, edge - 4 } do
-			createPart(decorations, ground, "TreeTrunk", Vector3.new(2, 7, 2), Vector3.new(x, 3.5, 10), Color3.fromRGB(105, 70, 45), Enum.Material.Wood)
-			local crown = createPart(decorations, ground, "TreeCrown", Vector3.new(7, 7, 7), Vector3.new(x, 8, 10), Color3.fromRGB(55, 125, 55), Enum.Material.Grass)
+		local treeX = edge - 7
+		local treeZ = -edge + 9
+		createPart(decorations, ground, "TreeTrunk", Vector3.new(2, 7, 2), Vector3.new(treeX, 3.5, treeZ), Color3.fromRGB(105, 70, 45), Enum.Material.Wood)
+		for _, offset in { Vector3.new(0, 8, 0), Vector3.new(-2.5, 7, 0), Vector3.new(2.5, 7, 0) } do
+			local crown = createPart(decorations, ground, "TreeCrown", Vector3.new(5.5, 5.5, 5.5), Vector3.new(treeX, 0, treeZ) + offset, Color3.fromRGB(55, 125, 55), Enum.Material.Grass)
 			crown.Shape = Enum.PartType.Ball
-		end
-		for _, x in { -edge + 2, edge - 2 } do
-			createPart(decorations, ground, "FlagPole", Vector3.new(0.5, 8, 0.5), Vector3.new(x, 4, edge - 1), Color3.fromRGB(80, 80, 85), Enum.Material.Metal)
-			createPart(decorations, ground, "Flag", Vector3.new(3, 2, 0.2), Vector3.new(x + (x < 0 and 1.5 or -1.5), 7, edge - 1), Color3.fromRGB(245, 185, 35), Enum.Material.Fabric)
 		end
 	end
 
-	if level >= 6 then
-		for _, x in { -4.5, 4.5 } do
-			createPart(decorations, ground, "GateTower", Vector3.new(2.5, 8, 2.5), Vector3.new(x, 4, edge + 0.5), stone, Enum.Material.Marble)
-		end
-		createPart(decorations, ground, "GateArch", Vector3.new(11, 2, 2), Vector3.new(0, 8, edge + 0.5), Color3.fromRGB(205, 175, 75), Enum.Material.Metal)
-		for _, x in { -edge + 3, edge - 3 } do
-			createPart(decorations, ground, "StatueBase", Vector3.new(4, 1.5, 4), Vector3.new(x, 0.8, -6), stone, Enum.Material.Marble)
-			local statue = createPart(decorations, ground, "Statue", Vector3.new(3, 5, 3), Vector3.new(x, 4, -6), Color3.fromRGB(210, 190, 95), Enum.Material.Metal)
-			statue.Shape = Enum.PartType.Ball
-		end
-		local jewel = createPart(decorations, ground, "CrownJewel", Vector3.new(3, 3, 3), Vector3.new(0, 4, -edge + 6), Color3.fromRGB(155, 70, 255), Enum.Material.Neon)
-		jewel.Shape = Enum.PartType.Ball
+	local levelConfig = Config.levels[level]
+	local entranceZ = ground.Size.Z / 2 + 0.5
+	local lampZ = ground.Size.Z / 2 - 2.5
+	placeAsset(decorations, ground, levelConfig.gateAssetId, "EntranceGate", 0, entranceZ, TARGET_GATE_HEIGHT, true)
+	for _, x in { -7, 7 } do
+		placeAsset(decorations, ground, levelConfig.lampAssetId, "EntranceLamp", x, lampZ, TARGET_LAMP_HEIGHT, false)
 	end
 	decorations.Parent = plot
 end
@@ -138,12 +227,12 @@ function PlotUpgradeService.start(plotService, economyService, remote, playerDat
 		plot:SetAttribute("TreasureCapacity", Config.levels[level].treasureCapacity)
 		if plot:GetAttribute("TreasureCount") == nil then plot:SetAttribute("TreasureCount", 0) end
 		if plot:GetAttribute("BuriedTreasureCount") == nil then plot:SetAttribute("BuriedTreasureCount", 0) end
-		buildFence(plot, ground)
+		buildFence(plot, ground, level)
 		buildDecorations(plot, ground, level)
 		for _, name in { "ShopSign", "PlotUpgradeSign" } do
 			local sign = plot:FindFirstChild(name)
 			if sign then
-				sign.CFrame = ground.CFrame * CFrame.new(name == "ShopSign" and -9 or 9, 3.5, size / 2 + 4) * CFrame.Angles(0, math.pi, 0)
+				sign.CFrame = ground.CFrame * CFrame.new(name == "ShopSign" and -8 or 8, 2.75, size / 2 + 2.3) * CFrame.Angles(0, math.pi, 0)
 			end
 		end
 		local depositPad = plot:FindFirstChild("DepositPad")

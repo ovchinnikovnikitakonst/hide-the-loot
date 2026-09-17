@@ -41,22 +41,25 @@ function TreasureStorageService.start(plotService, treasureService)
 			local rack = Instance.new("Model")
 			rack.Name = "TreasureStorage"
 			local backZ = -ground.Size.Z / 2 + 3
-			local wood = Color3.fromRGB(104, 72, 48)
-			createPart(rack, ground, "Back", Vector3.new(36, 9, 0.5), Vector3.new(0, 4.8, backZ - 1.7), wood, Enum.Material.WoodPlanks)
-			for _, y in { 0.65, 3.65, 6.65 } do
-				createPart(rack, ground, "Shelf", Vector3.new(36, 0.3, 4), Vector3.new(0, y, backZ), wood, Enum.Material.WoodPlanks)
+			local wood = Color3.fromRGB(126, 89, 59)
+			for _, x in { -18, -9, 0, 9, 18 } do
+				createPart(rack, ground, "RackPost", Vector3.new(0.6, 9, 0.6), Vector3.new(x, 4.5, backZ - 1.4), wood, Enum.Material.Wood)
 			end
-			local title = createPart(rack, ground, "Title", Vector3.new(18, 2.5, 0.6), Vector3.new(0, 10, backZ - 1.6), Color3.fromRGB(35, 38, 43), Enum.Material.Slate)
+			for _, y in { 0.65, 3.65, 6.65 } do
+				createPart(rack, ground, "Shelf", Vector3.new(36, 0.3, 3.6), Vector3.new(0, y, backZ), wood, Enum.Material.WoodPlanks)
+				createPart(rack, ground, "BackRail", Vector3.new(36, 0.4, 0.4), Vector3.new(0, y + 1.35, backZ - 1.5), wood, Enum.Material.Wood)
+			end
+			local title = createPart(rack, ground, "Title", Vector3.new(12, 1.8, 0.5), Vector3.new(0, 9.5, backZ - 1.45), Color3.fromRGB(93, 66, 45), Enum.Material.WoodPlanks)
 			local gui = Instance.new("SurfaceGui")
 			gui.Face = Enum.NormalId.Back
-			gui.CanvasSize = Vector2.new(500, 100)
+			gui.CanvasSize = Vector2.new(480, 90)
 			gui.Parent = title
 			local label = Instance.new("TextLabel")
 			label.Size = UDim2.fromScale(1, 1)
 			label.BackgroundTransparency = 1
-			label.Text = "ХРАНИЛИЩЕ СУНДУКОВ"
+			label.Text = "СУНДУКИ"
 			label.TextColor3 = Color3.new(1, 1, 1)
-			label.TextSize = 30
+			label.TextSize = 36
 			label.Font = Enum.Font.GothamBold
 			label.Parent = gui
 			rack.Parent = plot

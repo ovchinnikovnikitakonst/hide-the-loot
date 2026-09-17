@@ -110,10 +110,18 @@ function MazeService.getZoneIdAtPosition(position)
 	if typeof(position) ~= "Vector3" or not mazeBaseplate then return nil end
 	local localPosition = mazeBaseplate.CFrame:PointToObjectSpace(position)
 	local center = MazeConfig.centerOffset
-	local radius = math.max(math.abs(localPosition.X - center.X), math.abs(localPosition.Z - center.Z))
-	for index = #MazeConfig.zoneOrder, 1, -1 do
-		local zoneId = MazeConfig.zoneOrder[index]
-		if radius < MazeConfig.zones[zoneId].maxRadius - 1 then return zoneId end
+	local mazeWidth = MazeConfig.gridSizeX * MazeConfig.cellSize
+	local mazeDepth = MazeConfig.gridSizeZ * MazeConfig.cellSize
+	local relativeX = localPosition.X - center.X
+	local relativeZ = localPosition.Z - center.Z
+	if math.abs(relativeZ) >= mazeDepth / 2 - 1
+		or relativeX <= -mazeWidth / 2 + 1
+		or relativeX >= mazeWidth / 2 - 1 then
+		return nil
+	end
+	local depth = relativeX + mazeWidth / 2
+	for _, zoneId in MazeConfig.zoneOrder do
+		if depth < MazeConfig.zones[zoneId].maxDepth then return zoneId end
 	end
 	return nil
 end
@@ -139,93 +147,118 @@ local function createZoneLabel(zone, position, baseplate)
 end
 
 local function createMazeWalls(baseplate, center)
-	local gridSize = MazeConfig.gridSize
+	local gridSizeX = MazeConfig.gridSizeX
+	local gridSizeZ = MazeConfig.gridSizeZ
 	local cellSize = MazeConfig.cellSize
-	local halfSize = gridSize * cellSize / 2
+	local wallHeight = MazeConfig.wallHeight
+	local halfSizeX = gridSizeX * cellSize / 2
+	local halfSizeZ = gridSizeZ * cellSize / 2
 	local random = Random.new(481516)
 	local vertical = {}
 	local horizontal = {}
 	local visited = {}
-	for x = 0, gridSize do
+	for x = 0, gridSizeX do
 		vertical[x] = {}
-		for z = 1, gridSize do vertical[x][z] = true end
+		for z = 1, gridSizeZ do vertical[x][z] = true end
 	end
-	for x = 1, gridSize do
+	for x = 1, gridSizeX do
 		horizontal[x] = {}
 		visited[x] = {}
-		for z = 0, gridSize do horizontal[x][z] = true end
+		for z = 0, gridSizeZ do horizontal[x][z] = true end
 	end
 
-	local middle = math.ceil(gridSize / 2)
-	local stack = { { x = middle, z = middle } }
-	visited[middle][middle] = true
-	while #stack > 0 do
-		local current = stack[#stack]
-		local neighbors = {}
-		for _, direction in { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } } do
-			local x = current.x + direction[1]
-			local z = current.z + direction[2]
-			if x >= 1 and x <= gridSize and z >= 1 and z <= gridSize and not visited[x][z] then
-				table.insert(neighbors, { x = x, z = z })
+	-- Build each difficulty band as its own connected maze. The walls between
+	-- bands are opened only at the configured gates below.
+	local zoneBands = {
+		{ 1, 7 }, { 8, 14 }, { 15, 21 },
+		{ 22, 28 }, { 29, 35 }, { 36, gridSizeX },
+	}
+	local entranceRow = math.ceil(gridSizeZ / 2)
+	for _, band in zoneBands do
+		local firstX = band[1]
+		local lastX = band[2]
+		local stack = { { x = firstX, z = entranceRow } }
+		visited[firstX][entranceRow] = true
+		while #stack > 0 do
+			local current = stack[#stack]
+			local neighbors = {}
+			for _, direction in { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } } do
+				local x = current.x + direction[1]
+				local z = current.z + direction[2]
+				if x >= firstX and x <= lastX and z >= 1 and z <= gridSizeZ and not visited[x][z] then
+					table.insert(neighbors, { x = x, z = z })
+				end
+			end
+			if #neighbors == 0 then
+				table.remove(stack)
+			else
+				local nextCell = neighbors[random:NextInteger(1, #neighbors)]
+				if nextCell.x > current.x then vertical[current.x][current.z] = false
+				elseif nextCell.x < current.x then vertical[current.x - 1][current.z] = false
+				elseif nextCell.z > current.z then horizontal[current.x][current.z] = false
+				else horizontal[current.x][current.z - 1] = false end
+				visited[nextCell.x][nextCell.z] = true
+				table.insert(stack, nextCell)
 			end
 		end
-		if #neighbors == 0 then
-			table.remove(stack)
-		else
-			local nextCell = neighbors[random:NextInteger(1, #neighbors)]
-			if nextCell.x > current.x then vertical[current.x][current.z] = false
-			elseif nextCell.x < current.x then vertical[current.x - 1][current.z] = false
-			elseif nextCell.z > current.z then horizontal[current.x][current.z] = false
-			else horizontal[current.x][current.z - 1] = false end
-			visited[nextCell.x][nextCell.z] = true
-			table.insert(stack, nextCell)
-		end
 	end
 
-	-- Extra openings turn the perfect maze into a network with alternative routes.
-	for x = 1, gridSize - 1 do
-		for z = 1, gridSize do
-			if vertical[x][z] and random:NextNumber() < 0.18 then vertical[x][z] = false end
+	-- The entrance area has more alternative routes; deeper zones keep more walls.
+	local function openingChance(x)
+		local depthRatio = math.clamp(x / gridSizeX, 0, 1)
+		return 0.28 - depthRatio * 0.18
+	end
+	for _, band in zoneBands do
+		for x = band[1], band[2] - 1 do
+			for z = 1, gridSizeZ do
+				if vertical[x][z] and random:NextNumber() < openingChance(x) then vertical[x][z] = false end
+			end
 		end
 	end
-	for x = 1, gridSize do
-		for z = 1, gridSize - 1 do
-			if horizontal[x][z] and random:NextNumber() < 0.18 then horizontal[x][z] = false end
+	for x = 1, gridSizeX do
+		for z = 1, gridSizeZ - 1 do
+			if horizontal[x][z] and random:NextNumber() < openingChance(x) then horizontal[x][z] = false end
 		end
 	end
-	vertical[0][middle] = false
-	vertical[gridSize][middle] = false
-	horizontal[middle][0] = false
-	horizontal[middle][gridSize] = false
+	for _, zOffset in MazeConfig.entranceZOffsets do
+		local row = math.clamp(math.floor((zOffset + halfSizeZ) / cellSize) + 1, 1, gridSizeZ)
+		vertical[0][row] = false
+	end
+	for boundaryIndex, rows in MazeConfig.zoneTransitionRows do
+		local boundaryX = zoneBands[boundaryIndex][2]
+		for _, row in rows do
+			vertical[boundaryX][math.clamp(row, 1, gridSizeZ)] = false
+		end
+	end
 
 	local wallColor = Color3.fromRGB(65, 75, 60)
 	local function wall(size, x, z)
-		createPart("MazeWall", size, Vector3.new(center.X + x, 17, center.Z + z), wallColor, Enum.Material.Rock, baseplate)
+		createPart("MazeWall", size, Vector3.new(center.X + x, 11 + wallHeight / 2, center.Z + z), wallColor, Enum.Material.Rock, baseplate)
 	end
-	for x = 0, gridSize do
+	for x = 0, gridSizeX do
 		local z = 1
-		while z <= gridSize do
+		while z <= gridSizeZ do
 			if not vertical[x][z] then
 				z += 1
 				continue
 			end
 			local first = z
-			while z <= gridSize and vertical[x][z] do z += 1 end
+			while z <= gridSizeZ and vertical[x][z] do z += 1 end
 			local count = z - first
-			wall(Vector3.new(2, 12, count * cellSize), -halfSize + x * cellSize, -halfSize + (first - 1) * cellSize + count * cellSize / 2)
+			wall(Vector3.new(2, wallHeight, count * cellSize), -halfSizeX + x * cellSize, -halfSizeZ + (first - 1) * cellSize + count * cellSize / 2)
 		end
 	end
-	for z = 0, gridSize do
+	for z = 0, gridSizeZ do
 		local x = 1
-		while x <= gridSize do
+		while x <= gridSizeX do
 			if not horizontal[x][z] then
 				x += 1
 				continue
 			end
 			local first = x
-			while x <= gridSize and horizontal[x][z] do x += 1 end
+			while x <= gridSizeX and horizontal[x][z] do x += 1 end
 			local count = x - first
-			wall(Vector3.new(count * cellSize, 12, 2), -halfSize + (first - 1) * cellSize + count * cellSize / 2, -halfSize + z * cellSize)
+			wall(Vector3.new(count * cellSize, wallHeight, 2), -halfSizeX + (first - 1) * cellSize + count * cellSize / 2, -halfSizeZ + z * cellSize)
 		end
 	end
 end
@@ -237,33 +270,27 @@ function MazeService.start(resolvedExplorerService)
 	local baseplate = Workspace:WaitForChild("Baseplate")
 	mazeBaseplate = baseplate
 	local center = MazeConfig.centerOffset
-	local mazeSize = MazeConfig.gridSize * MazeConfig.cellSize
+	local mazeWidth = MazeConfig.gridSizeX * MazeConfig.cellSize
+	local mazeDepth = MazeConfig.gridSizeZ * MazeConfig.cellSize
 	mazeModel = Instance.new("Model")
 	mazeModel.Name = "CentralMaze"
 	mazeModel.Parent = Workspace
-	createPart("MazeFloor", Vector3.new(mazeSize, 1, mazeSize), Vector3.new(center.X, 10.5, center.Z), Color3.fromRGB(82, 94, 75), Enum.Material.Slate, baseplate)
+	createPart("MazeFloor", Vector3.new(mazeWidth, 1, mazeDepth), Vector3.new(center.X, 10.5, center.Z), Color3.fromRGB(82, 94, 75), Enum.Material.Slate, baseplate)
 
 	local function zoneFloor(zoneId, size, x, z)
 		local zone = MazeConfig.zones[zoneId]
 		local part = createPart(zoneId .. "ZoneFloor", size, Vector3.new(center.X + x, 11.06, center.Z + z), zone.color, Enum.Material.SmoothPlastic, baseplate)
 		part.Transparency = 0.18
 	end
-	for index, zoneId in MazeConfig.zoneOrder do
+	local previousDepth = 0
+	for _, zoneId in MazeConfig.zoneOrder do
 		local zone = MazeConfig.zones[zoneId]
-		local innerZoneId = MazeConfig.zoneOrder[index + 1]
-		local innerRadius = innerZoneId and MazeConfig.zones[innerZoneId].maxRadius or 0
-		if innerRadius == 0 then
-			zoneFloor(zoneId, Vector3.new(zone.maxRadius * 2, 0.12, zone.maxRadius * 2), 0, 0)
-		else
-			local band = zone.maxRadius - innerRadius
-			local middle = (zone.maxRadius + innerRadius) / 2
-			zoneFloor(zoneId, Vector3.new(zone.maxRadius * 2, 0.12, band), 0, -middle)
-			zoneFloor(zoneId, Vector3.new(zone.maxRadius * 2, 0.12, band), 0, middle)
-			zoneFloor(zoneId, Vector3.new(band, 0.12, innerRadius * 2), -middle, 0)
-			zoneFloor(zoneId, Vector3.new(band, 0.12, innerRadius * 2), middle, 0)
-		end
-		local labelRadius = (zone.maxRadius + innerRadius) / 2
-		createZoneLabel(zone, Vector3.new(center.X - labelRadius, 15, center.Z), baseplate)
+		local bandWidth = zone.maxDepth - previousDepth
+		local middleDepth = (previousDepth + zone.maxDepth) / 2
+		local x = -mazeWidth / 2 + middleDepth
+		zoneFloor(zoneId, Vector3.new(bandWidth, 0.12, mazeDepth), x, 0)
+		createZoneLabel(zone, Vector3.new(center.X + x, 15, center.Z), baseplate)
+		previousDepth = zone.maxDepth
 	end
 
 	createMazeWalls(baseplate, center)

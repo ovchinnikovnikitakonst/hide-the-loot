@@ -1,8 +1,9 @@
 local DataStoreService = game:GetService("DataStoreService")
 local Players = game:GetService("Players")
+local DecorationConfig = require(game:GetService("ReplicatedStorage").Shared.config.DecorationConfig)
 
 local DATASTORE_NAME = "PlayerData_v1"
-local SCHEMA_VERSION = 1
+local SCHEMA_VERSION = 4
 local AUTOSAVE_INTERVAL = 120
 local MAX_RETRIES = 3
 local DEFAULT_DATA = table.freeze({
@@ -10,6 +11,10 @@ local DEFAULT_DATA = table.freeze({
 	coins = 100000,
 	explorerLicenseLevel = 1,
 	plotLevel = 1,
+	treasures = table.freeze({}),
+	searchCooldowns = table.freeze({}),
+	decorInventory = table.freeze({}),
+	placedDecorations = table.freeze({}),
 })
 
 local dataLoaded = Instance.new("BindableEvent")
@@ -25,7 +30,80 @@ local function copyDefaults()
 		coins = DEFAULT_DATA.coins,
 		explorerLicenseLevel = DEFAULT_DATA.explorerLicenseLevel,
 		plotLevel = DEFAULT_DATA.plotLevel,
+		treasures = {},
+		searchCooldowns = {},
+		decorInventory = {},
+		placedDecorations = {},
 	}
+end
+
+local function sanitizeDecorInventory(rawInventory)
+	local inventory = {}
+	if type(rawInventory) ~= "table" then return inventory end
+	for itemId in DecorationConfig.items do
+		local count = rawInventory[itemId]
+		if type(count) == "number" and count % 1 == 0 and count > 0 then
+			inventory[itemId] = math.clamp(count, 1, DecorationConfig.maxOwnedPerType)
+		end
+	end
+	return inventory
+end
+
+local function sanitizePlacedDecorations(rawDecorations)
+	local decorations = {}
+	if type(rawDecorations) ~= "table" then return decorations end
+	for index = 1, math.min(#rawDecorations, DecorationConfig.maxPlaced) do
+		local record = rawDecorations[index]
+		if type(record) == "table" and DecorationConfig.items[record.id]
+			and type(record.x) == "number" and type(record.z) == "number"
+			and record.x == record.x and record.z == record.z
+			and math.abs(record.x) <= 1000 and math.abs(record.z) <= 1000 then
+			table.insert(decorations, { id = record.id, x = record.x, z = record.z })
+		end
+	end
+	return decorations
+end
+
+local function sanitizeSearchCooldowns(rawCooldowns)
+	local cooldowns = {}
+	if type(rawCooldowns) ~= "table" then return cooldowns end
+	local now = os.time()
+	local count = 0
+	for ownerUserId, retryAt in rawCooldowns do
+		local numericUserId = type(ownerUserId) == "string" and tonumber(ownerUserId) or nil
+		if numericUserId and numericUserId % 1 == 0 and numericUserId ~= 0
+			and type(retryAt) == "number" and retryAt % 1 == 0 and retryAt > now and retryAt <= now + 86400 then
+			cooldowns[ownerUserId] = retryAt
+			count += 1
+			if count >= 50 then break end
+		end
+	end
+	return cooldowns
+end
+
+local function sanitizeTreasures(rawTreasures)
+	local treasures = {}
+	if type(rawTreasures) ~= "table" then return treasures end
+	for index = 1, math.min(#rawTreasures, 24) do
+		local rawTreasure = rawTreasures[index]
+		if type(rawTreasure) == "table" and type(rawTreasure.typeId) == "string"
+			and #rawTreasure.typeId <= 64 and (rawTreasure.status == "stored" or rawTreasure.status == "buried") then
+			local treasure = {
+				typeId = rawTreasure.typeId,
+				status = rawTreasure.status,
+			}
+			if rawTreasure.status == "buried" and type(rawTreasure.x) == "number" and type(rawTreasure.z) == "number"
+				and rawTreasure.x == rawTreasure.x and rawTreasure.z == rawTreasure.z
+				and math.abs(rawTreasure.x) <= 1000 and math.abs(rawTreasure.z) <= 1000 then
+				treasure.x = rawTreasure.x
+				treasure.z = rawTreasure.z
+			else
+				treasure.status = "stored"
+			end
+			table.insert(treasures, treasure)
+		end
+	end
+	return treasures
 end
 
 local function sanitize(raw)
@@ -40,6 +118,10 @@ local function sanitize(raw)
 	if type(raw.plotLevel) == "number" and raw.plotLevel % 1 == 0 then
 		data.plotLevel = math.clamp(raw.plotLevel, 1, 6)
 	end
+	data.treasures = sanitizeTreasures(raw.treasures)
+	data.searchCooldowns = sanitizeSearchCooldowns(raw.searchCooldowns)
+	data.decorInventory = sanitizeDecorInventory(raw.decorInventory)
+	data.placedDecorations = sanitizePlacedDecorations(raw.placedDecorations)
 	return data
 end
 
@@ -49,6 +131,10 @@ local function snapshot(profile)
 		coins = profile.data.coins,
 		explorerLicenseLevel = profile.data.explorerLicenseLevel,
 		plotLevel = profile.data.plotLevel,
+		treasures = profile.data.treasures,
+		searchCooldowns = profile.data.searchCooldowns,
+		decorInventory = profile.data.decorInventory,
+		placedDecorations = profile.data.placedDecorations,
 	}
 end
 
